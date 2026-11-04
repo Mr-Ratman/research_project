@@ -1,6 +1,6 @@
 library(tidyverse)
 
-data <- read_csv("Desktop/research project/graph PDF01P03/data.csv")
+data <- read_csv("data.csv")
 
 fill_colours <- c("red", "magenta", "dodgerblue", "turquoise")
 
