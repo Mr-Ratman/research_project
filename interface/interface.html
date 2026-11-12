@@ -1,0 +1,1483 @@
+<!doctype html>
+<html>
+<head>
+<style>
+html {
+  font-size: 14px;
+  font-family: Futura, sans-serif;
+}
+.heading {
+  font-size: 18px;
+  font-weight: bold;
+}
+.section_label {
+  font-weight: bold;
+}
+.disabled {
+  color: lightgrey;
+}
+.info {
+  font-size: 10px;
+  font-weight: normal;
+  cursor: pointer;
+}
+.info span {
+  position: absolute;
+  margin-left: 0.5em;
+  border: 1px solid lightgrey;
+  padding: 2px;
+  background-color: white;
+  display: none;
+}
+.info:hover span {
+  display: initial;
+}
+.count {
+  width: 10em;
+  padding-left: 1em;
+}
+.note {
+  font-size: 80%;
+}
+/*vertical-align lines up checkboxes with labels*/
+.exclude_label {
+  vertical-align: middle;  
+}
+input[type='button'] {
+  margin: 0.5em 0em;
+  padding: 0.5em 1em;
+}
+input[type='button']:hover {
+  cursor: pointer;
+  opacity: 50%;
+}
+input[type='button'].back {
+  background-color: white;
+  color: blue;
+}
+input[type='button'].reset {
+  background-color: red;
+  color: white;
+}
+/*vertical-align lines up checkboxes with labels*/
+input[type='checkbox'] {
+  vertical-align: middle;
+}
+input[type='checkbox']:hover {
+  cursor: pointer;
+}
+input[type='checkbox'][disabled]:hover {
+  cursor: default;
+}
+label:hover {
+  cursor: pointer;
+}
+label.disabled:hover {
+  cursor: default;
+}
+table.filters td {
+  padding-right: 1em;
+  vertical-align: top;
+}
+table.ranges td {
+  padding-right: 1em;
+}
+table.ranges .range_output {
+  margin-left: 2em;
+  font-size: 0.75em;
+}
+select {
+  padding: 0.5em 1em;
+  background-color: white;
+  color: blue;
+}
+#regions option {
+  font-weight: bold;
+}
+#results_container {
+  display: none;
+}
+#table_output {
+  border-collapse: collapse;
+}
+#table_output th {
+  background-color: lightgrey;
+}
+#table_output th, #table_output td {
+  border: 1px solid grey;
+  padding: 0 0.5em;
+  font-size: 80%;
+}
+#table_output td:last-child {
+  text-align: center;
+  font-size: 150%;
+  cursor: pointer;
+}
+#contacts_close_container {
+  float: right;
+}
+#contacts_close_container input {
+  padding: 0.5em;
+}
+#contacts table {
+  border-collapse: collapse;
+}
+#contacts th {
+  background-color: lightgrey;
+}
+#contacts th, #contacts td {
+  border: 1px solid grey;
+  padding: 0 0.5em;
+}
+</style>
+<script>
+/*general functions*/
+function format_number(x) {
+  /*only use commas in number greater than or equal to 10000*/
+  if (x >= 10000) {
+    return x.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  } else {
+    return x;
+  }
+}
+</script>
+<script src='double_range.js'></script>
+<script src='pagination.js'></script>
+<script src='data.json'></script>
+<script>
+/*functions for filtering and displaying data*/
+
+/*school_list is the current filtered list of schools*/
+var school_list = [];
+
+/*results_per_page is the number of results to show at one time*/
+const results_per_page = 100;
+
+/*"pagination_update" event is fired by a paginator when a new page of results is chosen*/
+document.addEventListener("pagination_update", function(e) {
+  /*clear results table*/
+  tbody_output.textContent = "";
+  /*if there are no results, display message and hide results table*/
+  if (school_list.length == 0) {
+    div_output.style.display = "initial";
+    results_container.style.display = "none";
+  } else {
+    div_output.style.display = "none";
+    results_container.style.display = "initial";
+  }
+  /*get schools for current page chosen in paginators - slice still works if "end" is greater than school_list.length*/
+  for (let school of school_list.slice((e.detail.selected - 1) * 100, e.detail.selected * 100)) {
+    /*create a row in results table*/
+    let tr = document.createElement("tr");
+    tbody_output.appendChild(tr);
+    let cell_contents = [
+      school.school,
+      school.city,
+      ids_to_text("stages", school.stages),
+      ids_to_text("curricula", school.curricula),
+      ids_to_text("examinations", school.examinations),
+      ids_to_text("accreditors", school.accreditors),
+      ids_to_text("departments", school.departments),
+      ids_to_text("facilities", school.facilities),
+      ids_to_text("associations", school.associations),
+      ids_to_text("start", [school.start]),
+      miscellaneous_to_text(school),
+      school.created,
+      school.ages.min + "-" + school.ages.max,
+      school.students,
+      school.fees.min + "-" + school.fees.max
+    ];
+    /*add a cell for each data field*/
+    for (let cell of cell_contents) {
+      let td = document.createElement("td");
+      td.textContent = cell;
+      tr.appendChild(td);
+    }
+    /*add cell for "show contacts" button*/
+    let td = document.createElement("td");
+    td.textContent = "⊕";
+    td.setAttribute("data-id", school.id);
+    tr.appendChild(td);
+  }
+});
+
+function apply_filters() {
+  /*begin with full list of schools*/
+  school_list = data.schools;
+  /*loop through all elements with id*/
+  for (let element of document.querySelectorAll("*[id]")) {
+    /*if element has a filter function apply it*/
+    if (element.filter_function) {
+      /*second argument is passed as thisArg*/
+      school_list = school_list.filter(element.filter_function, element);
+    }
+  }
+
+  /*update total schools count display*/
+  total_schools_count.textContent = format_number(school_list.length);
+
+  /*update total contacts count display*/
+  /*school_list.map((e) => e.id) creates an array of school IDs*/
+  let school_list_array = school_list.map((e) => e.id);
+  let contact_list = data.contacts.filter((contact) => school_list_array.includes(contact.school_id));
+  total_contacts_count.textContent = format_number(contact_list.length);
+
+  /*set up paginators*/
+  pagination(document.querySelectorAll(".div_paginator"), Math.ceil(school_list.length / results_per_page) || 1);
+}
+
+/*from an array of ids, retrieve the text values for the ids from the matching select menu to display in results table*/
+function ids_to_text(filter, ids) {
+  let string_return = "";
+  let options = {};
+  let array_options = [];
+  let select = document.getElementById(filter);
+  if (select) {
+    options = select.querySelectorAll("option");
+  }
+  for (let option of options) {
+    array_options[parseInt(option.value)] = option.textContent;
+  }
+  for (let id of ids) {
+    if (array_options[id]) {
+      string_return += array_options[id] + ", ";
+    } else {
+      string_return += id + ", ";
+    }
+  }
+  /*remove the final comma and space*/
+  return string_return.slice(0, -2);
+}
+
+/*from miscellaneous attributes create a text list to display in results table*/
+function miscellaneous_to_text(school) {
+  let string_return = "";
+  let attributes = ["nonprofit", "bilingual", "boarding", "online", "future"];
+  for (let attribute of attributes) {
+    if (school[attribute]) {
+      if (attribute == "nonprofit") {
+        string_return += "non-profit, ";
+      } else {
+        string_return += attribute + ", ";
+      }
+    }
+  }
+  /*remove the final comma and space*/
+  return string_return.slice(0, -2);
+}
+</script>
+<script>
+/*initial setup functions - set up all filter controls*/
+
+document.addEventListener("DOMContentLoaded", function() {
+
+  /*set heights of select menus*/
+  /*subregions is the maximum size - set countries and cities to that size*/
+  regions.size = regions.querySelectorAll("option").length;
+  subregions.size = subregions.querySelectorAll("optgroup").length + subregions.querySelectorAll("option").length;
+  countries.size = subregions.size
+  cities.size = subregions.size
+
+  /*update map*/
+  update_map(regions);
+
+  /*update Created Since date picker - the maximum date will be the first day of next year*/
+  created.max = (new Date()).getFullYear() + 1 + "-01-01";
+
+  function update_map(target) {
+  /*this function updates the map - if one option is selected it shows that location, otherwise it shows the whole world*/
+
+    function src(q) {
+    /*this function returns src of embedded map, given location*/
+      return "https://www.google.com/maps?q=" + q + "&z=2&output=embed";
+    }
+
+    const string_default_src = "https://www.google.com/maps/embed";
+
+    /*if only 1 region is selected set src of embedded map*/
+    if (target.selectedOptions.length == 1) {
+      /*some locations have attribute data-google_maps_text if textContent doesn't work with Google Maps e.g. Northern America*/
+      map.src = src(target.selectedOptions[0].dataset.google_maps_text || target.selectedOptions[0].textContent);
+    } else {
+      /*only set map.src if it's not already the default, otherwise it reloads and flashes*/
+      if (map.src != string_default_src) {
+        map.src = string_default_src;
+      }
+    }
+  }
+
+  function parent_to_child(string_parent, string_child) {
+  /*this function checks selections in parent multiselect, and makes matching selections in child multiselect,
+  for example, if Brazil is selected/unselected, Brasília, Rio de Janeiro and São Paulo will be selected/unselected*/
+    let parent_options = document.getElementById(string_parent).querySelectorAll("option");
+    let child_options = document.getElementById(string_child).querySelectorAll("option");
+    for (let parent_option of parent_options) {
+      for (let child_option of child_options) {
+        /*if data attribute of child option matches text of parent option, make the selections match*/
+        if (child_option.dataset[string_parent] == parent_option.textContent) {
+          child_option.selected = parent_option.selected;
+        }
+      }
+    }
+  }
+
+  function child_to_parent(string_child, string_parent) {
+  /*this function checks selections in child multiselect, and makes matching selections in parent multiselect,
+  for example, if Brasília, Rio de Janeiro and São Paulo are all selected, Brazil will be selected,
+  otherwise Brazil will be unselected*/
+    let parent_options = document.getElementById(string_parent).querySelectorAll("option");
+    let child_options = document.getElementById(string_child).querySelectorAll("option");
+    /*object_parent keeps track of which parent options should be selected - start with all true*/
+    let object_parent = {};
+    for (let parent_option of parent_options) {
+      object_parent[parent_option.textContent] = true;
+    }
+    /*if any child option is not selected, matching parent option will not be selected*/
+    for (let child_option of child_options) {
+      if (child_option.selected == false) {
+        object_parent[child_option.dataset[string_parent]] = false;
+      }
+    }
+    /*make parent options match object_parent*/
+    for (let parent_option of parent_options) {
+      parent_option.selected = object_parent[parent_option.textContent];
+    }
+  }
+
+  function update_multiselects(string_target) {
+  /*this function updates all location multiselects, starting from one that changed, then going up and down*/
+    const array_locations = ["regions", "subregions", "countries", "cities"];
+    /*find multiselect that changed in array_locations*/
+    let index = array_locations.findIndex(x => x == string_target);
+    /*update all parent multiselects*/
+    for (let i = index; i > 0; i--) {
+      child_to_parent(array_locations[i], array_locations[i - 1]);
+    }
+    /*update all child multiselects*/
+    for (let i = index; i < array_locations.length - 1; i++) {
+      parent_to_child(array_locations[i], array_locations[i + 1]);
+    }
+    /*update the map*/
+    update_map(document.getElementById(string_target));
+  }
+
+  function update_exclude_checkbox(target, enabled) {
+  /*if a filter is changed, update its exclude checkbox*/
+    let exclude_checkbox = window[target.id + "_exclude"];
+    let exclude_label = exclude_checkbox.parentElement.querySelector("label");
+    if (enabled) {
+      exclude_checkbox.disabled = false;
+      exclude_label.classList.remove("disabled");
+    } else {
+      exclude_checkbox.checked = false;
+      exclude_checkbox.disabled = true;
+      exclude_label.classList.add("disabled");
+    }
+  }
+
+  /*listen for "change" event on "exclude" checkboxes - apply filters*/
+  document.addEventListener("change", function(e) {
+    if (e.target.id.slice(-8) == "_exclude") {
+      apply_filters();
+    }
+  });
+
+  /*when region selection changes, update subregion, country and city selections*/
+  regions.addEventListener("change", function(e) {
+    update_multiselects(e.target.id);
+    update_exclude_checkbox(cities, cities.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  /*when subregion selection changes, update region, country and city selections*/
+  subregions.addEventListener("change", function(e) {
+    update_multiselects(e.target.id);
+    update_exclude_checkbox(cities, cities.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  /*when country selection changes, update region, subregion and city selections*/
+  countries.addEventListener("change", function(e) {
+    update_multiselects(e.target.id);
+    update_exclude_checkbox(cities, cities.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  /*when city selection changes, update region, subregion and country selection*/
+  cities.addEventListener("change", function(e) {
+    update_multiselects(e.target.id);
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  cities.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => option.value);
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.includes(school.city);
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.includes(school.city);
+      }
+    /*if options are not selected return false*/
+    } else {
+      return false;
+    }
+  }
+
+  stages.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  stages.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(stage => school.stages.includes(stage));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(stage => school.stages.includes(stage));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  curricula.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  curricula.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(curriculum => school.curricula.includes(curriculum));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(curriculum => school.curricula.includes(curriculum));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  examinations.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  examinations.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(examination => school.examinations.includes(examination));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(examination => school.examinations.includes(examination));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  accreditors.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  accreditors.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(accreditor => school.accreditors.includes(accreditor));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(accreditor => school.accreditors.includes(accreditor));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  departments.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  departments.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(department => school.departments.includes(department));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(department => school.departments.includes(department));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  facilities.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  facilities.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(facility => school.facilities.includes(facility));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(facility => school.facilities.includes(facility));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  associations.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.selectedOptions.length > 0);
+    apply_filters();
+  });
+
+  associations.filter_function = function(school) {
+    let selection = Array.from(this.selectedOptions).map(option => parseInt(option.value));
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if options are selected*/
+    if (this.selectedOptions.length > 0) {
+      /*if exclude is checked, return true if school does not include every option*/
+      if (exclude_checkbox.checked) {
+        return !selection.every(association => school.associations.includes(association));
+      /*if exclude is not checked return true if school does include every option*/
+      } else {
+        return selection.every(association => school.associations.includes(association));
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  start.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.value !== "");
+    apply_filters();
+  });
+
+  start.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if an option is selected*/
+    if (this.value) {
+      /*if exclude is checked, return true if school start value is not chosen value*/
+      if (exclude_checkbox.checked) {
+        return school.start != parseInt(this.value);
+      /*if exclude is not checked return true if school start value is chosen value*/
+      } else {
+        return school.start == parseInt(this.value);
+      }
+    /*if options are not selected return true*/
+    } else {
+      return true;
+    }
+  }
+
+  nonprofit.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.checked);
+    apply_filters();
+  });
+
+  nonprofit.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if checkbox is checked*/
+    if (this.checked) {
+      /*if exclude is checked, return opposite of data value*/
+      if (exclude_checkbox.checked) {
+        return !school.nonprofit;
+      /*if exclude is not checked return data value*/
+      } else {
+        return school.nonprofit;
+      }
+    /*if checkbox is not checked return true*/
+    } else {
+      return true;
+    }
+  }
+
+  bilingual.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.checked);
+    apply_filters();
+  });
+
+  bilingual.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if checkbox is checked*/
+    if (this.checked) {
+      /*if exclude is checked, return opposite of data value*/
+      if (exclude_checkbox.checked) {
+        return !school.bilingual;
+      /*if exclude is not checked return data value*/
+      } else {
+        return school.bilingual;
+      }
+    /*if checkbox is not checked return true*/
+    } else {
+      return true;
+    }
+  }
+
+  boarding.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.checked);
+    apply_filters();
+  });
+
+  boarding.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if checkbox is checked*/
+    if (this.checked) {
+      /*if exclude is checked, return opposite of data value*/
+      if (exclude_checkbox.checked) {
+        return !school.boarding;
+      /*if exclude is not checked return data value*/
+      } else {
+        return school.boarding;
+      }
+    /*if checkbox is not checked return true*/
+    } else {
+      return true;
+    }
+  }
+
+  online.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.checked);
+    apply_filters();
+  });
+
+  online.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if checkbox is checked*/
+    if (this.checked) {
+      /*if exclude is checked, return opposite of data value*/
+      if (exclude_checkbox.checked) {
+        return !school.online;
+      /*if exclude is not checked return data value*/
+      } else {
+        return school.online;
+      }
+    /*if checkbox is not checked return true*/
+    } else {
+      return true;
+    }
+  }
+
+  future.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.checked);
+    apply_filters();
+  });
+
+  future.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if checkbox is checked*/
+    if (this.checked) {
+      /*if exclude is checked, return opposite of data value*/
+      if (exclude_checkbox.checked) {
+        return !school.future;
+      /*if exclude is not checked return data value*/
+      } else {
+        return school.future;
+      }
+    /*if checkbox is not checked return true*/
+    } else {
+      return true;
+    }
+  }
+
+  created.addEventListener("change", function(e) {
+    update_exclude_checkbox(e.target, e.target.value !== "");
+    apply_filters();
+  });
+
+  created.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if date is chosen*/
+    if (this.value) {
+      /*if exclude is checked, return true if date created is less than chosen date*/
+      if (exclude_checkbox.checked) {
+        return Date.parse(school.created) < Date.parse(this.value)
+      /*if exclude is not checked return true if date created is greater than or equal to chosen date*/
+      } else {
+        return Date.parse(school.created) >= Date.parse(this.value);
+      }
+    /*if date is not chosen return true*/
+    } else {
+      return true;
+    }
+  }
+
+  age.addEventListener("input", function() {
+    /*enable the exclude checkbox if the range is not at the min/max limits*/
+    update_exclude_checkbox(this, this.double_range.min() > this.double_range.min_limit || this.double_range.max() < this.double_range.max_limit);
+    apply_filters();
+  });
+
+  age.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if range is chosen*/
+    if (exclude_checkbox.disabled == false) {
+      /*if exclude is checked, return true if age range is not within chosen range*/
+      if (exclude_checkbox.checked) {
+        return school.ages.min < this.double_range.min() || school.ages.max > this.double_range.max()
+      /*if exclude is not checked return true if age range is within chosen range*/
+      } else {
+        return school.ages.min >= this.double_range.min() && school.ages.max <= this.double_range.max();
+      }
+    /*if date is not chosen return true*/
+    } else {
+      return true;
+    }
+  }
+
+  students.addEventListener("input", function() {
+    /*enable the exclude checkbox if the range is not at the min/max limits*/
+    update_exclude_checkbox(this, this.double_range.min() > this.double_range.min_limit || this.double_range.max() < this.double_range.max_limit);
+    apply_filters();
+  });
+
+  students.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if range is chosen*/
+    if (exclude_checkbox.disabled == false) {
+      /*if exclude is checked, return true if number of students is not within chosen range*/
+      if (exclude_checkbox.checked) {
+        return school.students < this.double_range.min() || school.students > this.double_range.max();
+      /*if exclude is not checked return true if number of students is within chosen range*/
+      } else {
+        return school.students >= this.double_range.min() && school.students <= this.double_range.max();
+      }
+    /*if range is not chosen return true*/
+    } else {
+      return true;
+    }
+  }
+
+  fees.addEventListener("input", function() {
+    /*enable the exclude checkbox if the range is not at the min/max limits*/
+    update_exclude_checkbox(this, this.double_range.min() > this.double_range.min_limit || this.double_range.max() < this.double_range.max_limit);
+    apply_filters();
+  });
+
+  fees.filter_function = function(school) {
+    /*find exclude checkbox*/
+    let exclude_checkbox = window[this.id + "_exclude"];
+    /*if range is chosen*/
+    if (exclude_checkbox.disabled == false) {
+      /*if exclude is checked, return true if fees range is not within chosen range*/
+      if (exclude_checkbox.checked) {
+        return school.fees.min < this.double_range.min() || school.fees.max > this.double_range.max()
+      /*if exclude is not checked return true if fees range is within chosen range*/
+      } else {
+        return school.fees.min >= this.double_range.min() && school.fees.max <= this.double_range.max();
+      }
+    /*if date is not chosen return true*/
+    } else {
+      return true;
+    }
+  }
+
+  /*set up double range sliders*/
+
+  /*total width of double range sliders*/
+  const DOUBLE_RANGE_WIDTH = 350;
+
+  /*output_spans is the span elements to display current min and max values*/
+  let output_spans = {};
+
+  output_spans = age.closest("tr").querySelector(".range_output").querySelectorAll("span");
+  age.double_range = new double_range(age, 0, 21, 1, DOUBLE_RANGE_WIDTH, output_spans[0], output_spans[1]);
+
+  output_spans = students.closest("tr").querySelector(".range_output").querySelectorAll("span");
+  students.double_range = new double_range(students, 0, 4000, 100, DOUBLE_RANGE_WIDTH, output_spans[0], output_spans[1]);
+
+  output_spans = fees.closest("tr").querySelector(".range_output").querySelectorAll("span");
+  fees.double_range = new double_range(fees, 0, 100000, 1000, DOUBLE_RANGE_WIDTH, output_spans[0], output_spans[1]);
+
+  /*if a reset button is clicked, reload the page*/
+  let resets = document.querySelectorAll(".reset");
+  for (let reset of resets) {
+    reset.addEventListener("click", function(e) {
+      location.reload();
+    });
+  }
+
+  /*if a "show contacts" button is clicked, show contacts popup*/
+  tbody_output.addEventListener("click", function(e) {
+    if (e.target.dataset.id) {
+      contacts.querySelector("h3").textContent = data.schools.filter((school) => school.id == e.target.dataset.id)[0].school;
+      let contact_list = data.contacts.filter((contact) => contact.school_id == e.target.dataset.id);
+      for (let contact of contact_list) {
+        let tr = document.createElement("tr");
+        contacts.querySelector("tbody").appendChild(tr);
+
+        let td = document.createElement("td");
+        td.textContent = contact.contact;
+        tr.appendChild(td);
+
+        td = document.createElement("td");
+        td.textContent = contact.position;
+        tr.appendChild(td);
+
+        td = document.createElement("td");
+        let a = document.createElement("a");
+        a.textContent = contact.email;
+        a.href = "mailto:" + contact.email;
+        td.appendChild(a);
+        tr.appendChild(td);
+      }
+      contacts.showModal();
+      contacts_close_container.querySelector("input").focus();
+    }
+  });
+
+  /*if close button of contacts popup is clicked, close popup and clear it*/
+  contacts_close_container.querySelector("input").addEventListener("click", function(e) {
+    contacts.close();
+    contacts.querySelector("h3").textContent = "";
+    contacts.querySelector("tbody").textContent = "";
+  });
+});
+</script>
+</head>
+<body>
+<div><input type='button' class='back' value='&lt; Back to Schools'></div>
+<hr>  
+<div class='heading'>Schools Advanced Filters <sup class='info'>ⓘ<span>start by choosing<br>some locations</span></sup></div>
+<table>
+  <tr>
+    <td class='section_label'>Total Schools Count: <sup class='info'>ⓘ<span>total number of schools<br>matching chosen filters</span></sup></td>
+    <td id='total_schools_count' class='count'>0</td>
+    <td class='section_label'>Total Contacts Count: <sup class='info'>ⓘ<span>total number of contact people<br>in schools matching chosen filters</span></sup></td>
+    <td  id='total_contacts_count'class='count'>0</td>
+  </tr>
+</table>
+<div><input type='button' class='reset' value='Reset Filters'></div>
+<div class='note'>Hold ctrl/command/shift or drag to select multiple options.</div>
+  <hr>
+<table class='filters'>
+  <tr>
+    <td colspan='4'>
+      <input type='checkbox' id='cities_exclude' disabled>
+      <label for='cities_exclude' class='exclude_label disabled'>exclude</label>
+      <sup class='info'>ⓘ<span>include all schools except<br>those matching chosen filter</span></sup>
+    </td>
+    <td rowspan='2'>
+      <iframe id='map' width='600' height='450' allowfullscreen='' loading='lazy' referrerpolicy='no-referrer-when-downgrade'></iframe>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <div><span class='section_label'>Regions</span></div>
+      <div>
+        <select id='regions' multiple='true'>
+          <option>Africa</option>
+          <option>Americas</option>
+          <option>Asia</option>
+          <option>Europe</option>
+          <option data-google_maps_text='Oceania+continent'>Oceania</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Subregions</span></div>
+      <div>
+        <select id='subregions' multiple='true'>
+          <optgroup label='Africa'>
+            <option data-regions='Africa'>Central Africa</option>
+            <option data-regions='Africa'>Eastern Africa</option>
+            <option data-regions='Africa'>Northern Africa</option>
+            <option data-regions='Africa'>Southern Africa</option>
+            <option data-regions='Africa'>Western Africa</option>
+          </optgroup>
+          <optgroup label='Americas'>
+            <option data-regions='Americas'>Caribbean</option>
+            <option data-regions='Americas'>Central America</option>
+            <option data-regions='Americas' data-google_maps_text='North America'>Northern America</option>
+            <option data-regions='Americas'>South America</option>
+          </optgroup>
+          <optgroup label='Asia'>
+            <option data-regions='Asia'>Central Asia</option>
+            <option data-regions='Asia'>East Asia</option>
+            <option data-regions='Asia'>Middle East</option>
+            <option data-regions='Asia'>South Asia</option>
+            <option data-regions='Asia'>Southeast Asia</option>
+          </optgroup>
+          <optgroup label='Europe'>
+            <option data-regions='Europe'>East Europe</option>
+            <option data-regions='Europe'>North Europe</option>
+            <option data-regions='Europe'>South Europe</option>
+            <option data-regions='Europe'>West Europe</option>
+          </optgroup>
+          <optgroup label='Oceania'>
+            <option data-regions='Oceania' data-google_maps_text='Oceania+continent'>Oceania</option>
+          </optgroup>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Countries</span></div>
+      <div>
+        <select id='countries' multiple='true'>
+          <option data-subregions='Northern Africa'>Algeria</option>
+          <option data-subregions='Central Africa'>Angola</option>
+          <option data-subregions='South America'>Argentina</option>
+          <option data-subregions='Oceania'>Australia</option>
+          <option data-subregions='West Europe'>Austria</option>
+          <option data-subregions='South Asia'>Bangladesh</option>
+          <option data-subregions='East Europe'>Belarus</option>
+          <option data-subregions='South America'>Brazil</option>
+          <option data-subregions='Central Africa'>Cameroon</option>
+          <option data-subregions='Northern America'>Canada</option>
+          <option data-subregions='Central Africa'>Chad</option>
+          <option data-subregions='South America'>Chile</option>
+          <option data-subregions='East Asia'>China</option>
+          <option data-subregions='South America'>Colombia</option>
+          <option data-subregions='Central America'>Costa Rica</option>
+          <option data-subregions='Caribbean'>Cuba</option>
+          <option data-subregions='Caribbean'>Dominican Republic</option>
+          <option data-subregions='Central Africa'>DR Congo</option>
+          <option data-subregions='Northern Africa'>Egypt</option>
+          <option data-subregions='Central America'>El Salvador</option>
+          <option data-subregions='Eastern Africa'>Ethiopia</option>
+          <option data-subregions='North Europe'>Finland</option>
+          <option data-subregions='West Europe'>France</option>
+          <option data-subregions='West Europe'>Germany</option>
+          <option data-subregions='Western Africa'>Ghana</option>
+          <option data-subregions='South Europe'>Greece</option>
+          <option data-subregions='Central America'>Guatemala</option>
+          <option data-subregions='Caribbean'>Haiti</option>
+          <option data-subregions='Central America'>Honduras</option>
+          <option data-subregions='East Europe'>Hungary</option>
+          <option data-subregions='South Asia'>India</option>
+          <option data-subregions='Southeast Asia'>Indonesia</option>
+          <option data-subregions='Middle East'>Iran</option>
+          <option data-subregions='Middle East'>Iraq</option>
+          <option data-subregions='North Europe'>Ireland</option>
+          <option data-subregions='South Europe'>Italy</option>
+          <option data-subregions='Western Africa'>Ivory Coast</option>
+          <option data-subregions='East Asia'>Japan</option>
+          <option data-subregions='Caribbean'>Jamaica</option>
+          <option data-subregions='Middle East' data-google_maps_text='Hashemite Kingdom of Jordan'>Jordan</option>
+          <option data-subregions='Eastern Africa'>Kenya</option>
+          <option data-subregions='Central Asia'>Kazakhstan</option>
+          <option data-subregions='Middle East'>Kuwait</option>
+          <option data-subregions='Central Asia'>Kyrgyzstan</option>
+          <option data-subregions='Northern Africa'>Libya</option>
+          <option data-subregions='Eastern Africa'>Madagascar</option>
+          <option data-subregions='Southeast Asia'>Malaysia</option>
+          <option data-subregions='Western Africa'>Mali</option>
+          <option data-subregions='Northern America'>Mexico</option>
+          <option data-subregions='Northern Africa'>Morocco</option>
+          <option data-subregions='Southeast Asia'>Myanmar</option>
+          <option data-subregions='Oceania'>New Zealand</option>
+          <option data-subregions='Central America'>Nicaragua</option>
+          <option data-subregions='Western Africa'>Nigeria</option>
+          <option data-subregions='North Europe'>Norway</option>
+          <option data-subregions='South Asia'>Pakistan</option>
+          <option data-subregions='Central America'>Panama</option>
+          <option data-subregions='South America'>Peru</option>
+          <option data-subregions='Southeast Asia'>Philippines</option>
+          <option data-subregions='East Europe'>Poland</option>
+          <option data-subregions='Caribbean'>Puerto Rico</option>
+          <option data-subregions='Central Africa'>Republic of the Congo</option>
+          <option data-subregions='East Europe'>Romania</option>
+          <option data-subregions='East Europe'>Russia</option>
+          <option data-subregions='Middle East'>Saudi Arabia</option>
+          <option data-subregions='South Europe'>Serbia</option>
+          <option data-subregions='Southeast Asia'>Singapore</option>
+          <option data-subregions='Eastern Africa'>Somalia</option>
+          <option data-subregions='Southern Africa'>South Africa</option>
+          <option data-subregions='East Asia'>South Korea</option>
+          <option data-subregions='West Europe'>Spain</option>
+          <option data-subregions='Northern Africa'>Sudan</option>
+          <option data-subregions='North Europe'>Sweden</option>
+          <option data-subregions='Central Asia'>Tajikistan</option>
+          <option data-subregions='Eastern Africa'>Tanzania</option>
+          <option data-subregions='Southeast Asia'>Thailand</option>
+          <option data-subregions='Middle East'>Turkey</option>
+          <option data-subregions='Central Asia'>Turkmenistan</option>
+          <option data-subregions='Eastern Africa'>Uganda</option>
+          <option data-subregions='East Europe'>Ukraine</option>
+          <option data-subregions='Middle East'>United Arab Emirates</option>
+          <option data-subregions='North Europe'>United Kingdom</option>
+          <option data-subregions='Northern America'>United States</option>
+          <option data-subregions='Central Asia'>Uzbekistan</option>
+          <option data-subregions='South America'>Venezuela</option>
+          <option data-subregions='Southeast Asia'>Vietnam</option>
+          <option data-subregions='Southern Africa'>Zimbabwe</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Cities</span></div>
+      <div>
+        <select id='cities' multiple='true'>
+          <option data-countries='Ivory Coast'>Abidjan</option>
+          <option data-countries='Ethiopia'>Addis Ababa</option>
+          <option data-countries='Egypt'>Alexandria</option>
+          <option data-countries='Algeria'>Algiers</option>
+          <option data-countries='Kazakhstan'>Almaty</option>
+          <option data-countries='Jordan'>Amman</option>
+          <option data-countries='Turkey'>Ankara</option>
+          <option data-countries='Madagascar'>Antananarivo</option>
+          <option data-countries='Turkmenistan'>Ashgabat</option>
+          <option data-countries='Kazakhstan'>Astana</option>
+          <option data-countries='Greece'>Athens</option>
+          <option data-countries='New Zealand'>Auckland</option>
+          <option data-countries='Iraq'>Baghdad</option>
+          <option data-countries='Mali'>Bamako</option>
+          <option data-countries='Thailand'>Bangkok</option>
+          <option data-countries='Spain' data-google_maps_text='Barcelona+city'>Barcelona</option>
+          <option data-countries='China'>Beijing</option>
+          <option data-countries='Serbia'>Belgrade</option>
+          <option data-countries='Brazil'>Belo Horizonte</option>
+          <option data-countries='India'>Bengaluru</option>
+          <option data-countries='Germany'>Berlin</option>
+          <option data-countries='United Kingdom'>Birmingham</option>
+          <option data-countries='Kyrgyzstan'>Bishkek</option>
+          <option data-countries='Colombia'>Bogotá</option>
+          <option data-countries='Brazil'>Brasília</option>
+          <option data-countries='Republic of the Congo'>Brazzaville</option>
+          <option data-countries='Australia'>Brisbane</option>
+          <option data-countries='Romania'>Bucharest</option>
+          <option data-countries='Hungary'>Budapest</option>
+          <option data-countries='Argentina'>Buenos Aires</option>
+          <option data-countries='Egypt'>Cairo</option>
+          <option data-countries='South Africa'>Cape Town</option>
+          <option data-countries='Venezuela'>Caracas</option>
+          <option data-countries='Morocco' data-google_maps_text='Casablanca+city'>Casablanca</option>
+          <option data-countries='China'>Chengdu</option>
+          <option data-countries='United States'>Chicago</option>
+          <option data-countries='Tanzania'>Dar es Salaam</option>
+          <option data-countries='India'>Delhi</option>
+          <option data-countries='Bangladesh'>Dhaka</option>
+          <option data-countries='Cameroon'>Douala</option>
+          <option data-countries='United Arab Emirates'>Dubai</option>
+          <option data-countries='Ireland'>Dublin</option>
+          <option data-countries='South Africa'>Durban</option>
+          <option data-countries='Tajikistan'>Dushanbe</option>
+          <option data-countries='Egypt'>Giza</option>
+          <option data-countries='China'>Guangzhou</option>
+          <option data-countries='Guatemala'>Guatemala City</option>
+          <option data-countries='South Africa'>Gqeberha</option>
+          <option data-countries='Germany'>Hamburg</option>
+          <option data-countries='Vietnam'>Hanoi</option>
+          <option data-countries='Zimbabwe'>Harare</option>
+          <option data-countries='Cuba'>Havana</option>
+          <option data-countries='Finland'>Helsinki</option>
+          <option data-countries='Vietnam'>Ho Chi Minh City</option>
+          <option data-countries='United States'>Houston</option>
+          <option data-countries='Nigeria'>Ibadan</option>
+          <option data-countries='Turkey'>Istanbul</option>
+          <option data-countries='Indonesia'>Jakarta</option>
+          <option data-countries='South Africa'>Johannesburg</option>
+          <option data-countries='Uganda'>Kampala</option>
+          <option data-countries='Nigeria' data-google_maps_text='Kano+city'>Kano</option>
+          <option data-countries='Pakistan'>Karachi</option>
+          <option data-countries='Ukraine'>Kharkiv</option>
+          <option data-countries='Sudan'>Khartoum</option>
+          <option data-countries='Jamaica' data-google_maps_text='Kingston+Jamaica'>Kingston</option>
+          <option data-countries='DR Congo'>Kinshasa</option>
+          <option data-countries='India'>Kolkata</option>
+          <option data-countries='Malaysia'>Kuala Lumpur</option>
+          <option data-countries='Ghana'>Kumasi</option>
+          <option data-countries='Kuwait'>Kuwait City</option>
+          <option data-countries='Ukraine'>Kyiv</option>
+          <option data-countries='Nigeria'>Lagos</option>
+          <option data-countries='Pakistan'>Lahore</option>
+          <option data-countries='Peru'>Lima</option>
+          <option data-countries='United Kingdom'>London</option>
+          <option data-countries='United States'>Los Angeles</option>
+          <option data-countries='Angola'>Luanda</option>
+          <option data-countries='DR Congo'>Lubumbashi</option>
+          <option data-countries='Spain'>Madrid</option>
+          <option data-countries='Nicaragua'>Managua</option>
+          <option data-countries='Philippines'>Manila</option>
+          <option data-countries='DR Congo'>Mbuji-Mayi</option>
+          <option data-countries='Colombia'>Medellín</option>
+          <option data-countries='Australia'>Melbourne</option>
+          <option data-countries='Belarus'>Minsk</option>
+          <option data-countries='Somalia'>Mogadishu</option>
+          <option data-countries='Canada'>Montreal</option>
+          <option data-countries='Russia'>Moscow</option>
+          <option data-countries='India'>Mumbai</option>
+          <option data-countries='Chad'>N'Djamena</option>
+          <option data-countries='Kenya'>Nairobi</option>
+          <option data-countries='United States'>New York</option>
+          <option data-countries='Norway'>Oslo</option>
+          <option data-countries='Panama'>Panama City</option>
+          <option data-countries='France'>Paris</option>
+          <option data-countries='Australia'>Perth</option>
+          <option data-countries='Haiti'>Port-au-Prince</option>
+          <option data-countries='South Africa'>Pretoria</option>
+          <option data-countries='Mexico'>Puebla City</option>
+          <option data-countries='Brazil'>Rio de Janeiro</option>
+          <option data-countries='Saudi Arabia'>Riyadh</option>
+          <option data-countries='Italy'>Rome</option>
+          <option data-countries='Russia'>Saint Petersburg</option>
+          <option data-countries='Costa Rica'>San José</option>
+          <option data-countries='Puerto Rico'>San Juan</option>
+          <option data-countries='Honduras'>San Pedro Sula</option>
+          <option data-countries='El Salvador'>San Salvador</option>
+          <option data-countries='Chile'>Santiago</option>
+          <option data-countries='Cuba'>Santiago de Cuba</option>
+          <option data-countries='Brazil'>São Paulo</option>
+          <option data-countries='Dominican Republic'>Santo Domingo</option>
+          <option data-countries='South Korea'>Seoul</option>
+          <option data-countries='China'>Shanghai</option>
+          <option data-countries='China'>Shenzhen</option>
+          <option data-countries='Kazakhstan'>Shymkent</option>
+          <option data-countries='Singapore'>Singapore</option>
+          <option data-countries='Sweden'>Stockholm</option>
+          <option data-countries='Indonesia'>Surabaya</option>
+          <option data-countries='Australia'>Sydney</option>
+          <option data-countries='Uzbekistan'>Tashkent</option>
+          <option data-countries='Honduras'>Tegucigalpa</option>
+          <option data-countries='Iran'>Tehran</option>
+          <option data-countries='Mexico'>Tijuana</option>
+          <option data-countries='Japan'>Tokyo</option>
+          <option data-countries='Canada'>Toronto</option>
+          <option data-countries='Libya'>Tripoli</option>
+          <option data-countries='Austria'>Vienna</option>
+          <option data-countries='Poland'>Warsaw</option>
+          <option data-countries='Cameroon'>Yaoundé</option>
+          <option data-countries='Myanmar'>Yangon</option>
+        </select>
+      </div>
+    </td>
+  </tr>
+</table>
+<hr>
+<table class='filters'>
+  <tr>
+    <td>
+      <div><span class='section_label'>School Stages</span></div>
+      <div>
+        <input type='checkbox' id='stages_exclude' disabled>
+        <label for='stages_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='stages' multiple='true'>
+          <option value='0'>Early Years</option>
+          <option value='1'>Junior</option>
+          <option value='2'>Middle</option>
+          <option value='3'>Senior</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Curricula</span></div>
+      <div>
+        <input type='checkbox' id='curricula_exclude' disabled>
+        <label for='curricula_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='curricula' multiple='true'>
+          <option value='0'>IB</option>
+          <option value='1'>IPC</option>
+          <option value='2'>British</option>
+          <option value='3'>American</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Examinations</span></div>
+      <div>
+        <input type='checkbox' id='examinations_exclude' disabled>
+        <label for='examinations_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='examinations' multiple='true'>
+          <option value='0'>IB</option>
+          <option value='1'>IGCSE</option>
+          <option value='2'>A-Levels</option>
+          <option value='3'>AP</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Accredited By</span></div>
+      <div>
+        <input type='checkbox' id='accreditors_exclude' disabled>
+        <label for='accreditors_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='accreditors' multiple='true'>
+          <option value='0'>CIS</option>
+          <option value='1'>ASIC</option>
+          <option value='2'>IB</option>
+          <option value='3'>NEASC</option>
+          <option value='4'>WASC</option>
+          <option value='5'>MSA-CESS</option>
+          <option value='6'>BSO</option>
+          <option value='7'>COBIS</option>
+          <option value='8'>EDT</option>
+        </select>
+      </div>
+    </td>
+    <td rowspan='2'>
+      <div><span class='section_label'>Miscellaneous</span></div>
+      <table class='filters'>
+        <tr>
+          <td>
+            <div>
+              <input type='checkbox' id='nonprofit'>
+              <label for='nonprofit'>Non-Profit</label>
+            </div>
+            <div>
+              <input type='checkbox' id='nonprofit_exclude' disabled>
+              <label for='nonprofit_exclude' class='exclude_label disabled'>exclude</label>
+            </div>
+          </td>
+          <td>
+            <div>
+              <input type='checkbox' id='bilingual'>
+              <label for='bilingual'>Bilingual</label>
+            </div>
+            <div>
+              <input type='checkbox' id='bilingual_exclude' disabled>
+              <label for='bilingual_exclude' class='exclude_label disabled'>exclude</label>
+            </div>
+          </td>
+          <td>
+            <div>
+              <input type='checkbox' id='boarding'>
+              <label for='boarding'>Boarding</label>
+            </div>
+            <div>
+              <input type='checkbox' id='boarding_exclude' disabled>
+              <label for='boarding_exclude' class='exclude_label disabled'>exclude</label>
+            </div>
+          </td>
+          <td>
+            <div>
+              <input type='checkbox' id='online'>
+              <label for='online'>Online School</label>
+            </div>
+            <div>
+              <input type='checkbox' id='online_exclude' disabled>
+              <label for='online_exclude' class='exclude_label disabled'>exclude</label>
+            </div>
+          </td>
+          <td>
+            <div>
+              <input type='checkbox' id='future'>
+              <label for='future'>Future School</label>
+            </div>
+            <div>
+              <input type='checkbox' id='future_exclude' disabled>
+              <label for='future_exclude' class='exclude_label disabled'>exclude</label>
+            </div>
+          </td>
+        </tr>
+      </table>
+      <table>
+        <tr>
+          <td>
+            <span>Created Since</span>
+            <input type='date' id='created' min='1900-01-01'>
+          </td>
+          <td>
+            <input type='checkbox' id='created_exclude' disabled>
+            <label for='created_exclude' class='exclude_label disabled'>exclude</label>
+          </td>
+        </tr>
+      </table>
+      <table class='ranges'>
+        <tr>
+          <td>
+            <div>Age of Students</div>
+            <div class='range_output'><span></span> - <span></span></div>
+          </td>
+          <td>
+            <div id='age'>
+            </div>
+          </td>
+          <td>
+            <input type='checkbox' id='age_exclude' disabled>
+            <label for='age_exclude' class='exclude_label disabled'>exclude</label>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div>Number of Students</div>
+            <div class='range_output'><span></span> - <span></span></div>
+          </td>
+          <td>
+            <div id='students'>
+            </div>
+          </td>
+          <td>
+            <input type='checkbox' id='students_exclude' disabled>
+            <label for='students_exclude' class='exclude_label disabled'>exclude</label>
+          </td>
+        </tr>
+        <tr>
+          <td>
+            <div>Fees in USD</div>
+            <div class='range_output'><span></span> - <span></span></div>
+          </td>
+          <td>
+            <div id='fees'>
+            </div>
+          </td>
+          <td>
+            <input type='checkbox' id='fees_exclude' disabled>
+            <label for='fees_exclude' class='exclude_label disabled'>exclude</label>
+          </td>
+      </table>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <div><span class='section_label'>Departments</span></div>
+      <div>
+        <input type='checkbox' id='departments_exclude' disabled>
+        <label for='departments_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='departments' multiple='true'>
+          <option value='0'>mathematics</option>
+          <option value='1'>sciences</option>
+          <option value='2'>languages</option>
+          <option value='3'>humanities</option>
+          <option value='4'>arts</option>
+          <option value='5'>technology</option>
+          <option value='6'>physical education</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Facilities</span></div>
+      <div>
+        <input type='checkbox' id='facilities_exclude' disabled>
+        <label for='facilities_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='facilities' multiple='true'>
+          <option value='0'>outdoor field</option>
+          <option value='1'>aquatics centre</option>
+          <option value='2'>cafeteria</option>
+          <option value='3'>performing arts</option>
+          <option value='4'>design studio</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>Associations</span></div>
+      <div>
+        <input type='checkbox' id='associations_exclude' disabled>
+        <label for='associations_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='associations' multiple='true'>
+          <option value='0'>COBIS</option>
+          <option value='1'>AoBSO</option>
+          <option value='2'>CIS</option>
+          <option value='3'>ECIS</option>
+          <option value='4'>FOBISIA</option>
+          <option value='5'>BSME</option>
+          <option value='6'>NABSS</option>
+          <option value='7'>ACAMIS</option>
+          <option value='8'>EARCOS</option>
+          <option value='9'>SASA</option>
+        </select>
+      </div>
+    </td>
+    <td>
+      <div><span class='section_label'>School Year Start</span></div>
+      <div>
+        <input type='checkbox' id='start_exclude' disabled>
+        <label for='start_exclude' class='exclude_label disabled'>exclude</label>
+      </div>
+      <div>
+        <select id='start' size='3'>
+          <option></option>
+          <option value='0'>northern (Aug/Sep)</option>
+          <option value='1'>southern (Jan/Feb)</option>
+        </select>
+      </div>
+    </td>
+  </tr>
+</table>
+<hr>
+<div class='heading'><input type='button' class='reset' value='Reset Filters'></div>
+<div id='div_output'>(no results)</div>
+<div id='results_container'>
+  <div class='div_paginator'></div>
+  <table id='table_output'>
+    <thead>
+      <tr><th>school</th><th>city</th><th>stages</th><th>curricula</th><th>examinations</th><th>accreditors</th><th>departments</th><th>facilities</th><th>associations</th><th>school year start</th><th>miscellaneous</th><th>created</th><th>ages</th><th>students</th><th>fees</th><th>contacts</th></tr>
+    </thead>
+    <tbody id='tbody_output'>
+    </tbody>
+  </table>
+  <div class='div_paginator'></div>
+</div>
+<dialog id='contacts'>
+  <div id='contacts_close_container'><input type='button' value='x'></div>
+  <h3></h3>
+  <table>
+    <thead>
+      <tr><th>name</th><th>position</th><th>email</th></tr>
+    </thead>
+    <tbody>
+    </tbody>
+  </table>
+</dialog>
+</body>
+</html>
